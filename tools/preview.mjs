@@ -3,7 +3,7 @@ import { scan, formatBytes } from '../src/scan.mjs';
 const daysFlag = process.argv.indexOf('--days');
 const coldDays = daysFlag >= 0 ? Number(process.argv[daysFlag + 1]) : 730;
 const started = Date.now();
-const report = scan(coldDays);
+const report = await scan(coldDays);
 
 console.log(`Steam: ${report.steamPath}`);
 console.log(`Cold window: ${report.coldDays} days`);

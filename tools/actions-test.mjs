@@ -69,7 +69,7 @@ async function rejects(promise, code) {
 
 try {
     const actions = createActions(effects);
-    let report = actions.register(scan(730));
+    let report = actions.register(await scan(730));
     const game = report.rows.find((row) => row.appid === '111');
     const shader = (appid) => report.orphans.shader.find((row) => row.appid === appid);
     const target999 = shader('999');
@@ -156,7 +156,7 @@ try {
     console.log('PASS: only one destructive action can run at a time');
 
     file(path.join(second, 'steamapps', 'appmanifest_777.acf'), '"AppState" {');
-    report = actions.register(scan(730));
+    report = actions.register(await scan(730));
     assert.ok(report.errors.length > 0, 'The corrupt manifest should produce a scan warning');
     await rejects(actions.perform({ operation: 'open', id: game.actions.id }), 'staleTarget');
     const blocked = report.orphans.shader.find((row) => row.appid === '444');

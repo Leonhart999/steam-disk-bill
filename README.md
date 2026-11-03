@@ -1,65 +1,75 @@
 # Steam Disk Bill
 
-A small Windows app that reads a local Steam library and shows where the disk went. Nothing is cleaned automatically; every removal needs explicit confirmation.
+A Windows app that reads your local Steam libraries and shows where the disk space went. Nothing is cleaned automatically; every removal needs explicit confirmation. Simplified Chinese and English UI.
 
-Double-click [Steam Disk Bill.vbs](Steam%20Disk%20Bill.vbs). That starts a local server on `127.0.0.1:47331` and opens an Edge app window. Closing the window stops the server. [steam-disk-bill-console.bat](steam-disk-bill-console.bat) does the same with a console left open.
+![Storage overview](docs/overview-en.png)
 
-The window lists:
+<sub>Screenshots use made-up demo data (`tools/readme-shots.mjs`).</sub>
 
-- installed size and free space per library
-- installs that were never played, or last played longer ago than 180 / 365 / 730 days
-- shader cache and workshop files left behind after a game was uninstalled
-- libraries on a drive that is currently unplugged, using the sizes saved in `libraryfolders.vdf`
+## Run it
+
+**Packaged:** download `Steam Disk Bill.exe` from [Releases](https://github.com/Leonhart999/steam-disk-bill/releases) and double-click it. No installer and no Node.js needed. The exe is not code-signed, so Windows SmartScreen may ask you to confirm the first time.
+
+**From source:** double-click [Steam Disk Bill.vbs](Steam%20Disk%20Bill.vbs) (needs Node.js 22 or newer), or run [steam-disk-bill-console.bat](steam-disk-bill-console.bat) to keep a console open. The launcher looks for `D:\Programs\nodejs\node.exe`, then `node` on `PATH`.
+
+Either way, a local server starts on `127.0.0.1:47331` and Microsoft Edge opens it as an app window. Closing the window stops the server. Set `STEAM_PATH` if Steam is not found automatically.
+
+## What it shows
+
+- installed size, free space and a usage bar per library drive
+- installs not played for 180 / 365 / 730 days, or with no local play history
+- shader cache and workshop folders left behind after a game was uninstalled
+- libraries on drives that are not connected, using the sizes Steam last recorded
 - in-progress downloads, shown separately and excluded from the review estimate
 
-## Libraries on other PCs
+Leftover caches and offline games have no install manifest, so their names are read from Steam's local app cache (`appcache/appinfo.vdf`). Nothing is fetched from the internet; cover art also comes from Steam's local cache. When the UI is Chinese and Steam has a Simplified Chinese name for a game, that name is shown.
 
-Nothing is tied to one machine. The Steam folder comes from `STEAM_PATH`, the Windows registry, or the default Program Files location. The library list comes from Steam's own `steamapps/libraryfolders.vdf`, so every drive added in Steam appears. A drive that is not currently connected is shown as offline with the sizes Steam last recorded.
+**Space to review** is a candidate estimate, not a guarantee that files can be safely removed. A missing play-history timestamp is labeled **No play history**, not as proof a game was never played.
 
-## Desktop interface
+## Low space and moving games
 
-The app uses a Steam-inspired blue-gray storage layout while keeping its own Steam Disk Bill identity. It includes sidebar views, library filters, searchable and sortable game rows, and expandable size breakdowns. Cover art comes only from Steam's existing local cache, including localized and legacy cache layouts; no artwork is downloaded.
+A drive counts as low on space below 10% or 20 GiB free. If another connected library drive has room, the app suggests up to three games to move there, inactive games first. Moving is done by Steam itself (Settings > Storage > select a game > Move); this app does not copy game files.
 
-Use the top-bar language selector to switch between Simplified Chinese and English. The first visit follows your browser's preferred supported language, with English as the fallback. Your selection is remembered locally when browser storage is available. Switching languages preserves the current scan, search, filters, threshold, sort mode, and expanded details without reading the disk again. Copied reports use the selected language; game names, file paths, and raw system diagnostics remain unchanged.
+## Storage trend (optional)
 
-Changing the inactivity threshold recalculates the current report immediately. Use **Scan libraries** to read the disk again. **Space to review** is a candidate estimate, not a guarantee that files can be safely removed. A missing local play-history timestamp is labeled as **No play history**, not as proof that a game has never been played.
+![Storage trend](docs/trend-en.png)
+
+Off by default. Turn on **Save scan summaries on this PC** and each scan saves totals and per-game sizes to `%LOCALAPPDATA%\SteamDiskBill\history.json` (the latest 180 scans). The chart shows installed size over time and the list shows which games grew, shrank, appeared or disappeared since the previous scan. Turning it off stops saving; **Clear history** deletes the file. Nothing is uploaded.
 
 ## Open folder and removal
 
-Expand a row to see two buttons:
+![Expanded game row](docs/games-en.png)
 
-- **Open folder** opens the game install folder or the cache folder in Explorer.
-- The red button depends on the row:
-  - **Uninstall via Steam…** for games. It sends `steam://uninstall/<appid>` to Steam through the same `steam.exe -- <url>` handler Steam registers for its links. Steam shows its own dialog; this app never deletes game folders itself.
-  - **Delete cache…** for leftover shader or workshop folders. Windows asks for confirmation and moves the folder to the Recycle Bin. If Windows says it cannot recycle the folder, cancel instead of choosing permanent deletion.
+Expand a row to open its folder in Explorer, or use the red button:
+
+- **Uninstall via Steam** for games sends `steam://uninstall/<appid>` through the same `steam.exe -- <url>` handler Steam registers for its links. Steam shows its own dialog; this app never deletes game folders.
+- **Delete cache** for leftover shader or workshop folders moves the folder to the Recycle Bin through the Windows shell. If Windows warns that it cannot recycle and would delete permanently, choose No.
 
 Safeguards:
 
 - a required checkbox and a one-time confirmation ticket that expires after two minutes
-- a per-session token on the local action API, with host and origin checks
+- a per-session token on the local API, with host and origin checks
 - re-validation against Steam's files right before acting; a rescan invalidates old targets
 - linked paths (junctions or symlinks) at or inside a target are refused
 - cache deletion is blocked while Steam is running, while Steam still has an install, download or library record for that app, or when the scan reported warnings
 - only one action runs at a time
 
-## Verification
+## Develop
 
 ```bash
 npm install --cache D:/Caches/npm
-npm run test:actions
-npm run test:ui
+npm run test:actions   # removal safeguards against a throwaway Steam layout in .test-tmp/
+npm run test:ui        # Playwright + installed Edge against the real local library
+npm run build          # dist/Steam Disk Bill.exe
 ```
 
-`test:actions` exercises the removal safeguards against a throwaway Steam layout in `.test-tmp/` with fake Windows side effects, so no real files are touched.
+- `test:actions` uses fake Windows side effects, so no real files are touched.
+- `test:ui` opens the removal dialog and cancels it, so nothing is uninstalled or deleted. History is written to `.test-tmp/` instead of your profile. Set `DISK_BILL_EXE="dist/Steam Disk Bill.exe"` to run the same checks against the packaged build. Stop a running instance first so the test can use the port.
+- `build` bundles the server with esbuild, embeds the page and the Recycle Bin helper as Node single-executable assets, sets the icon and version with rcedit, and switches the exe to the Windows GUI subsystem so no console appears.
+- `node tools/readme-shots.mjs` regenerates the screenshots in `docs/` from demo data. `node tools/make-icon.mjs` rebuilds `assets/icon.ico` from `assets/icon.svg`.
 
-The UI smoke test uses the installed Windows Edge browser with Playwright, reads the real local Steam library, and checks navigation/search/sorting/details/copy/error handling. It opens the removal dialog and cancels it, so no uninstall or deletion is requested. It also verifies Chinese/English switching, state preservation, localized reports, language persistence, switching during a pending scan, initial failures, and blocked preference storage. Lifecycle checks replay the real scan response rather than reading the disk repeatedly. Screenshots are saved to `screenshots/`. Stop a running instance first so the test can own its local port. Test tools are not required to launch the app.
+Layout: `src/scan.mjs` reads libraries and caches, `src/appinfo.mjs` reads names from Steam's binary app cache, `src/actions.mjs` handles open/removal requests, `src/history.mjs` stores the optional summaries, and `src/server.mjs` serves the UI in `app/`. A text summary without the window: `node tools/preview.mjs --days 365`.
 
-Requires Node.js. The launcher looks for `D:\Programs\nodejs\node.exe`, then `node` on `PATH`. Edge is used for the window. Set `STEAM_PATH` if Steam is not in the registry.
+## License
 
-A text summary without the window:
-
-```bash
-node tools/preview.mjs --days 365
-```
-
-`src/scan.mjs` is the scanner and `src/actions.mjs` handles open/removal requests. `backend/` and `frontend/` are an earlier Millennium plugin; the desktop app does not need Millennium.
+[MIT](LICENSE)

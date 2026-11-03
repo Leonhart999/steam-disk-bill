@@ -1,14 +1,21 @@
 {
   "name": "steam-disk-bill",
+  "version": "1.0.0",
+  "description": "Windows app that shows where your Steam library disk space went",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "scripts": {
     "start": "node src/server.mjs",
     "preview": "node tools/preview.mjs",
     "test:actions": "node tools/actions-test.mjs",
-    "test:ui": "node tools/ui-smoke.mjs"
+    "test:ui": "node tools/ui-smoke.mjs",
+    "build": "node tools/build-exe.mjs"
   },
   "devDependencies": {
-    "playwright": "^1.58.2"
+    "esbuild": "^0.28.2",
+    "playwright": "^1.58.2",
+    "postject": "^1.0.0-alpha.6",
+    "rcedit": "^5.0.2"
   }
 }

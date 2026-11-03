@@ -1,12 +1,17 @@
 // Read-only Steam library scan. Used by the desktop app and tools/preview.mjs.
+// Async so the local server keeps answering (heartbeat, progress) while a scan runs.
 
-import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import fs from 'node:fs';
+import { execFile } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
+import { readdir, readFile, stat, statfs } from 'node:fs/promises';
 import path from 'node:path';
+import { promisify } from 'node:util';
+import { readAppNames } from './appinfo.mjs';
 
+const execute = promisify(execFile);
 const REDIST_APPID = '228980';
 const FULLY_INSTALLED = 4;
+const BATCH = 64;
 
 let cachedSteamPath = '';
 
@@ -14,7 +19,7 @@ export function formatBytes(bytes) {
     if (!bytes) {
         return '0 B';
     }
-    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
     let value = bytes;
     let unit = 0;
     while (value >= 1024 && unit < units.length - 1) {
@@ -98,21 +103,22 @@ function parseVdf(text) {
     return parseValue();
 }
 
-function findSteam() {
+function hasSteam(candidate) {
+    return Boolean(candidate) && existsSync(path.join(candidate, 'steamapps', 'libraryfolders.vdf'));
+}
+
+export async function findSteam() {
     if (cachedSteamPath) {
         return cachedSteamPath;
     }
-    if (process.env.STEAM_PATH && existsSync(path.join(process.env.STEAM_PATH, 'steamapps', 'libraryfolders.vdf'))) {
+    if (hasSteam(process.env.STEAM_PATH)) {
         cachedSteamPath = process.env.STEAM_PATH;
         return cachedSteamPath;
     }
     try {
-        const registered = execFileSync(
-            'powershell.exe',
-            ['-NoProfile', '-Command', '(Get-ItemProperty HKCU:\\Software\\Valve\\Steam).SteamPath'],
-            { encoding: 'utf8' },
-        ).trim();
-        if (registered && existsSync(path.join(registered, 'steamapps', 'libraryfolders.vdf'))) {
+        const { stdout } = await execute('reg.exe', ['query', 'HKCU\\Software\\Valve\\Steam', '/v', 'SteamPath'], { windowsHide: true });
+        const registered = /SteamPath\s+REG_\w+\s+(.+)/.exec(stdout)?.[1]?.trim();
+        if (hasSteam(registered)) {
             cachedSteamPath = registered;
             return cachedSteamPath;
         }
@@ -121,7 +127,7 @@ function findSteam() {
     }
     const programFiles = [process.env['ProgramFiles(x86)'], process.env.ProgramFiles].filter(Boolean);
     for (const candidate of programFiles.map((directory) => path.join(directory, 'Steam'))) {
-        if (existsSync(path.join(candidate, 'steamapps', 'libraryfolders.vdf'))) {
+        if (hasSteam(candidate)) {
             cachedSteamPath = candidate;
             return cachedSteamPath;
         }
@@ -129,25 +135,31 @@ function findSteam() {
     throw new Error('Steam install not found. Set STEAM_PATH.');
 }
 
-function dirSize(root) {
-    let total = 0;
+// Sums regular files. Links are not followed; unreadable entries count as zero.
+async function dirSize(root) {
     let entries;
     try {
-        entries = readdirSync(root, { withFileTypes: true });
+        entries = await readdir(root, { withFileTypes: true });
     } catch {
         return 0;
     }
-    for (const entry of entries) {
-        const full = path.join(root, entry.name);
-        if (entry.isDirectory()) {
-            total += dirSize(full);
-        } else if (entry.isFile()) {
-            try {
-                total += statSync(full).size;
-            } catch {
-                // A file can disappear mid-scan. Skip it.
+    let total = 0;
+    for (let start = 0; start < entries.length; start += BATCH) {
+        const sizes = await Promise.all(entries.slice(start, start + BATCH).map(async (entry) => {
+            const full = path.join(root, entry.name);
+            if (entry.isDirectory()) {
+                return dirSize(full);
             }
-        }
+            if (entry.isFile()) {
+                try {
+                    return (await stat(full)).size;
+                } catch {
+                    return 0; // A file can disappear mid-scan.
+                }
+            }
+            return 0;
+        }));
+        total += sizes.reduce((sum, size) => sum + size, 0);
     }
     return total;
 }
@@ -161,12 +173,15 @@ function isRedist(appid, name) {
     return appid === REDIST_APPID || lower.includes('redistributable') || lower.includes('steamworks common');
 }
 
-function numericDirs(root) {
+async function numericDirs(root) {
     const found = new Map();
-    if (!existsSync(root)) {
+    let entries;
+    try {
+        entries = await readdir(root, { withFileTypes: true });
+    } catch {
         return found;
     }
-    for (const entry of readdirSync(root, { withFileTypes: true })) {
+    for (const entry of entries) {
         if (entry.isDirectory() && /^\d+$/.test(entry.name)) {
             found.set(entry.name, path.join(root, entry.name));
         }
@@ -174,15 +189,12 @@ function numericDirs(root) {
     return found;
 }
 
-function volumeFree(root) {
-    if (typeof fs.statfsSync !== 'function') {
-        return 0;
-    }
+async function volumeSpace(root) {
     try {
-        const stats = fs.statfsSync(root);
-        return Number(stats.bavail) * Number(stats.bsize);
+        const stats = await statfs(root);
+        return { free: Number(stats.bavail) * Number(stats.bsize), total: Number(stats.blocks) * Number(stats.bsize) };
     } catch {
-        return 0;
+        return { free: 0, total: 0 };
     }
 }
 
@@ -205,17 +217,19 @@ function totalBytes(row) {
     return row.size + row.shader + row.workshop;
 }
 
-export function scan(coldDays) {
-    const steamPath = findSteam();
+// progress({ step, library, index, count }) is called before each library is read.
+export async function scan(coldDays, progress = () => {}) {
+    const steamPath = await findSteam();
     const now = Math.floor(Date.now() / 1000);
     const libraries = loadLibraries(steamPath);
+    const online = new Map(libraries.map((library) => [library.path, existsSync(library.path)]));
     const known = new Set();
     const apps = [];
     const errors = [];
 
-    for (const library of libraries) {
-        const online = existsSync(library.path);
-        if (!online) {
+    for (const [index, library] of libraries.entries()) {
+        progress({ step: 'manifests', library: library.path, index: index + 1, count: libraries.length });
+        if (!online.get(library.path)) {
             for (const [appid, size] of Object.entries(library.apps)) {
                 known.add(appid);
                 apps.push({
@@ -233,17 +247,20 @@ export function scan(coldDays) {
             continue;
         }
         const steamapps = path.join(library.path, 'steamapps');
-        if (!existsSync(steamapps)) {
+        let names;
+        try {
+            names = await readdir(steamapps);
+        } catch {
             continue;
         }
-        for (const name of readdirSync(steamapps)) {
+        for (const name of names) {
             const match = name.match(/^appmanifest_(\d+)\.acf$/);
             if (!match) {
                 continue;
             }
             let body;
             try {
-                body = parseVdf(readFileSync(path.join(steamapps, name), 'utf8'));
+                body = parseVdf(await readFile(path.join(steamapps, name), 'utf8'));
             } catch (error) {
                 errors.push(`${name}: ${error instanceof Error ? error.message : String(error)}`);
                 continue;
@@ -286,6 +303,7 @@ export function scan(coldDays) {
         return {
             appid: app.appid,
             name: app.name,
+            nameZh: null,
             library: app.library,
             installDir: app.installdir,
             size: app.size,
@@ -304,11 +322,11 @@ export function scan(coldDays) {
 
     const orphans = { shader: [], workshop: [] };
 
-    function claim(libraryPath, root, field, bucket) {
+    async function claim(libraryPath, root, field, bucket) {
         let orphanBytes = 0;
         let emptyDirs = 0;
-        for (const [appid, folder] of numericDirs(root)) {
-            const bytes = dirSize(folder);
+        for (const [appid, folder] of await numericDirs(root)) {
+            const bytes = await dirSize(folder);
             if (bytes <= 0) {
                 emptyDirs += 1;
                 continue;
@@ -318,7 +336,7 @@ export function scan(coldDays) {
             if (target) {
                 target[field] += bytes;
             } else {
-                bucket.push({ appid, library: libraryPath, bytes });
+                bucket.push({ appid, name: null, nameZh: null, library: libraryPath, bytes });
                 orphanBytes += bytes;
             }
         }
@@ -332,44 +350,60 @@ export function scan(coldDays) {
     let temp = 0;
     const libraryRows = [];
 
-    for (const library of libraries) {
-        const online = existsSync(library.path);
-        if (online) {
-            const shader = claim(library.path, path.join(library.path, 'steamapps', 'shadercache'), 'shader', orphans.shader);
-            const workshop = claim(
-                library.path,
-                path.join(library.path, 'steamapps', 'workshop', 'content'),
-                'workshop',
-                orphans.workshop,
-            );
+    for (const [index, library] of libraries.entries()) {
+        progress({ step: 'caches', library: library.path, index: index + 1, count: libraries.length });
+        const isOnline = online.get(library.path);
+        let space = { free: 0, total: 0 };
+        if (isOnline) {
+            const steamapps = path.join(library.path, 'steamapps');
+            const shader = await claim(library.path, path.join(steamapps, 'shadercache'), 'shader', orphans.shader);
+            const workshop = await claim(library.path, path.join(steamapps, 'workshop', 'content'), 'workshop', orphans.workshop);
             orphanShader += shader.orphanBytes;
             orphanWorkshop += workshop.orphanBytes;
             emptyShaderDirs += shader.emptyDirs;
-            const downloading = path.join(library.path, 'steamapps', 'downloading');
-            if (existsSync(downloading)) {
-                for (const entry of readdirSync(downloading)) {
-                    const full = path.join(downloading, entry);
-                    try {
-                        const stat = statSync(full);
-                        downloads += stat.isDirectory() ? dirSize(full) : stat.size;
-                    } catch {
-                        errors.push(`downloading/${entry}: unreadable`);
-                    }
+            const downloading = path.join(steamapps, 'downloading');
+            let entries = [];
+            try {
+                entries = await readdir(downloading);
+            } catch {
+                // No downloads folder.
+            }
+            for (const entry of entries) {
+                const full = path.join(downloading, entry);
+                try {
+                    const info = await stat(full);
+                    downloads += info.isDirectory() ? await dirSize(full) : info.size;
+                } catch {
+                    errors.push(`downloading/${entry}: unreadable`);
                 }
             }
-            const staging = path.join(library.path, 'steamapps', 'temp');
-            if (existsSync(staging)) {
-                temp += dirSize(staging);
-            }
+            temp += await dirSize(path.join(steamapps, 'temp'));
+            space = await volumeSpace(library.path);
         }
         const installed = rows.filter((row) => row.library === library.path);
         libraryRows.push({
             path: library.path,
-            online,
-            free: online ? volumeFree(library.path) : 0,
+            volume: path.parse(path.resolve(library.path)).root.toUpperCase(),
+            online: isOnline,
+            free: space.free,
+            total: space.total,
             installed: installed.reduce((sum, row) => sum + row.size, 0),
             count: installed.length,
         });
+    }
+
+    // Offline apps and leftover caches have no manifest; Steam's local app cache knows their names.
+    progress({ step: 'names', library: steamPath, index: libraries.length, count: libraries.length });
+    const cacheList = [...orphans.shader, ...orphans.workshop];
+    const names = await readAppNames(steamPath, [...rows.map((row) => row.appid), ...cacheList.map((row) => row.appid)]);
+    for (const item of [...rows, ...cacheList]) {
+        const found = names.get(item.appid);
+        if (!found) continue;
+        if (item.offline || item.name === null) {
+            item.name = found.name;
+            if ('redist' in item) item.redist = isRedist(item.appid, found.name);
+        }
+        if (found.zh && found.zh !== item.name) item.nameZh = found.zh;
     }
 
     rows.sort((left, right) => totalBytes(right) - totalBytes(left));

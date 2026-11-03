@@ -2,25 +2,28 @@
 // Closing the window stops the process after the page stops checking in.
 
 import { spawn } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { scan } from './scan.mjs';
-import { randomBytes } from 'node:crypto';
 import { ActionError, createActions } from './actions.mjs';
+import { readAsset } from './assets.mjs';
+import { createHistory } from './history.mjs';
+import { scan } from './scan.mjs';
 
 const PORT = 47331;
 const HOST = '127.0.0.1';
 const ORIGIN = `http://${HOST}:${PORT}`;
 const sessionToken = randomBytes(32).toString('hex');
 const actions = createActions();
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'app');
-const PAGE = path.join(ROOT, 'index.html');
+const history = createHistory();
 const STATIC_FILES = {
-    '/styles.css': { name: 'styles.css', type: 'text/css; charset=utf-8' },
-    '/app.js': { name: 'app.js', type: 'text/javascript; charset=utf-8' },
-    '/i18n.js': { name: 'i18n.js', type: 'text/javascript; charset=utf-8' },
+    '/': { name: 'app/index.html', type: 'text/html; charset=utf-8' },
+    '/index.html': { name: 'app/index.html', type: 'text/html; charset=utf-8' },
+    '/styles.css': { name: 'app/styles.css', type: 'text/css; charset=utf-8' },
+    '/app.js': { name: 'app/app.js', type: 'text/javascript; charset=utf-8' },
+    '/i18n.js': { name: 'app/i18n.js', type: 'text/javascript; charset=utf-8' },
+    '/history.js': { name: 'app/history.js', type: 'text/javascript; charset=utf-8' },
 };
 const EDGE_CANDIDATES = [
     'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
@@ -29,6 +32,8 @@ const EDGE_CANDIDATES = [
 
 let lastBeat = Date.now();
 let scanning = false;
+let progress = null;
+let lastReport = null;
 let opened = false;
 let artworkRoot = null;
 const artworkFiles = new Map();
@@ -153,7 +158,7 @@ const server = http.createServer(async (request, response) => {
     }
     if (request.method === 'GET' && Object.hasOwn(STATIC_FILES, url.pathname)) {
         const asset = STATIC_FILES[url.pathname];
-        const content = readFileSync(path.join(ROOT, asset.name));
+        const content = readAsset(asset.name);
         response.writeHead(200, {
             'Content-Type': asset.type,
             'Content-Length': content.length,
@@ -179,28 +184,25 @@ const server = http.createServer(async (request, response) => {
         response.end();
         return;
     }
-    if (request.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
-        const html = readFileSync(PAGE);
-        response.writeHead(200, {
-            'Content-Type': 'text/html; charset=utf-8',
-            'Content-Length': html.length,
-            'Cache-Control': 'no-store',
-        });
-        response.end(html);
-        return;
-    }
     if (request.method === 'GET' && url.pathname === '/api/scan') {
-        if (actions.busy) { sendJson(response, 409, { ok: false, error: 'An action is still running.' }); return; }
+        if (actions.busy || scanning) { sendJson(response, 409, { ok: false, error: 'Another scan or action is still running.' }); return; }
         actions.invalidate();
         scanning = true;
+        progress = null;
         lastBeat = Date.now();
         const started = Date.now();
         try {
-            const report = scan(clampDays(url.searchParams.get('days')));
+            const report = await scan(clampDays(url.searchParams.get('days')), (step) => { progress = step; });
             const cache = path.join(report.steamPath, 'appcache', 'librarycache');
             artworkRoot = existsSync(cache) ? cache : null;
             artworkFiles.clear();
             report.elapsedMs = Date.now() - started;
+            lastReport = report;
+            try {
+                report.historySaved = await history.record(report);
+            } catch {
+                report.historySaved = false; // History is optional; a write failure must not hide the scan.
+            }
             sendJson(response, 200, actions.register(report));
         } catch (error) {
             sendJson(response, 500, {
@@ -209,7 +211,30 @@ const server = http.createServer(async (request, response) => {
             });
         } finally {
             scanning = false;
+            progress = null;
             lastBeat = Date.now();
+        }
+        return;
+    }
+    if (request.method === 'GET' && url.pathname === '/api/progress') {
+        sendJson(response, 200, { ok: true, scanning, progress });
+        return;
+    }
+    if (request.method === 'GET' && url.pathname === '/api/history') {
+        sendJson(response, 200, { ok: true, ...(await history.state()) });
+        return;
+    }
+    if (request.method === 'POST' && (url.pathname === '/api/history/settings' || url.pathname === '/api/history/clear')) {
+        if (!trustedRequest(request, true)) {
+            sendJson(response, 403, { ok: false, code: 'forbidden' });
+            return;
+        }
+        try {
+            if (url.pathname === '/api/history/clear') await history.clear();
+            else await history.setEnabled((await readJson(request)).enabled === true, lastReport);
+            sendJson(response, 200, { ok: true, ...(await history.state()) });
+        } catch (error) {
+            sendJson(response, 400, { ok: false, code: error instanceof ActionError ? error.code : 'operationFailed' });
         }
         return;
     }

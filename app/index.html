@@ -63,7 +63,7 @@
         <div class="summary-stats" id="summary-stats"><div class="loading-stats" data-i18n="reading">Reading local libraries</div></div>
       </section>
 
-      <section class="library-section" aria-labelledby="library-heading"><div class="section-heading"><h2 id="library-heading" data-i18n="libraryFolders">Library folders</h2><span id="library-count" class="muted" data-i18n="detecting">Detecting drives</span></div><div id="libraries" class="libraries"><div class="skeleton library-skeleton"></div><div class="skeleton library-skeleton"></div></div></section>
+      <section class="library-section" aria-labelledby="library-heading"><div class="section-heading"><h2 id="library-heading" data-i18n="libraryFolders">Library folders</h2><span id="library-count" class="muted" data-i18n="detecting">Detecting drives</span></div><div id="libraries" class="libraries"><div class="skeleton library-skeleton"></div><div class="skeleton library-skeleton"></div></div><div id="migration-notes" class="migration-notes"></div></section>
 
       <section class="games-section" aria-labelledby="list-heading">
         <div class="section-heading"><div class="list-heading"><h2 id="list-heading" data-i18n="view.all">Installed games</h2><span class="count-pill" id="result-count">—</span></div><button class="text-button" id="copy" type="button" disabled><svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span data-i18n="copy">Copy report</span></button></div>
@@ -72,6 +72,8 @@
         <p class="view-description" data-i18n="actionsHint">Expand a row to open its folder or review removal options.</p>
         <div class="table-wrap"><table id="game-table"><thead><tr><th scope="col" data-i18n="gameHeader">GAME</th><th scope="col" class="size-column" data-i18n="sizeHeader">SIZE ON DISK</th><th scope="col" class="played-column" data-i18n="playedHeader">LAST PLAYED</th><th scope="col" class="expand-column"><span class="sr-only" data-i18n="details">Details</span></th></tr></thead><tbody id="game-rows"><tr><td colspan="4"><div class="loading-state"><span class="spinner"></span><span data-i18n="checking">Checking installed games and caches</span></div></td></tr></tbody></table></div>
       </section>
+
+      <section class="history-section" aria-labelledby="history-heading"><div class="section-heading"><h2 id="history-heading" data-i18n="historyTitle">Storage trend</h2><div class="history-controls"><label class="switch"><input id="history-toggle" type="checkbox" role="switch" disabled><span data-i18n="historyToggle">Save scan summaries on this PC</span></label><button id="history-clear" class="text-button" type="button" hidden><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg><span data-i18n="historyClear">Clear history</span></button></div></div><div id="history-body" class="history-body"></div></section>
 
       <div id="scan-notes" class="scan-notes"></div>
       <div class="safety-note"><svg class="icon" aria-hidden="true"><use href="#i-info"/></svg><p data-i18n="safety">Review estimates are not a promise of safe cleanup. Play history can be incomplete. Game removal goes through Steam; cache removal requires confirmation in this app and Windows. Nothing is cleaned automatically.</p></div>

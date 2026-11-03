@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdir } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { mkdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
@@ -8,12 +9,18 @@ import { chromium } from 'playwright';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const output = path.join(root, 'screenshots');
 const base = 'http://127.0.0.1:47331';
+const historyFolder = path.join(root, '.test-tmp', 'ui-history');
+await rm(historyFolder, { recursive: true, force: true });
 const browser = await chromium.launch({
     executablePath: 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
     headless: true,
 });
-const server = spawn(process.execPath, [path.join(root, 'src/server.mjs'), '--no-open'], {
+// DISK_BILL_EXE=dist/Steam Disk Bill.exe runs the same checks against the packaged build.
+const packaged = process.env.DISK_BILL_EXE ? path.resolve(root, process.env.DISK_BILL_EXE) : null;
+const server = spawn(packaged || process.execPath, packaged ? ['--no-open'] : [path.join(root, 'src/server.mjs'), '--no-open'], {
     cwd: root, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
+    // Keep test history out of the real %LOCALAPPDATA% folder.
+    env: { ...process.env, STEAM_DISK_BILL_DATA: historyFolder },
 });
 let serverLog = '';
 server.stderr.on('data', (chunk) => { serverLog += chunk; });
@@ -238,6 +245,79 @@ try {
     await page.unroute('**/api/scan?*');
     await language.selectOption('en');
     console.log('PASS: switching language while a scan is pending keeps busy state coherent');
+
+    // Names for leftover caches and offline apps come from Steam's local appinfo cache.
+    await page.locator('[data-view="cache"]').click();
+    for (const row of [...report.orphans.shader, ...report.orphans.workshop].filter((item) => item.name)) {
+        assert.ok((await page.locator('.game-name').allTextContents()).includes(row.name), `Cache ${row.appid} should show ${row.name}`);
+    }
+    await page.locator('[data-view="offline"]').click();
+    const namedOffline = report.rows.filter((app) => app.offline && app.name !== `App ${app.appid}`);
+    for (const app of namedOffline) assert.ok((await page.locator('.game-name').allTextContents()).includes(app.name));
+    await page.locator('[data-view="all"]').click();
+    const onlineCard = page.locator(`#libraries [data-library="${onlineIndex}"] [role="meter"]`);
+    const onlineLib = report.libraryRows[onlineIndex];
+    assert.equal(Number(await onlineCard.getAttribute('aria-valuenow')), Math.round(((onlineLib.total - onlineLib.free) / onlineLib.total) * 100));
+    assert.ok(Number((await onlineCard.locator('span').evaluate((bar) => bar.style.width)).replace('%', '')) > 0);
+    console.log(`PASS: local names for ${namedOffline.length} offline apps and named caches; drive usage meter`);
+
+    // History is opt-in and stored in the isolated test folder.
+    assert.equal(await page.locator('#history-toggle').isChecked(), false);
+    assert.match(await page.locator('#history-body').textContent(), /Off by default/);
+    await page.locator('#history-toggle').check();
+    await page.waitForFunction(() => document.getElementById('history-body').textContent.includes('One scan saved'));
+    assert.ok(existsSync(path.join(historyFolder, 'history.json')), 'Enabling history should save the current scan');
+    // A real rescan: the status bar should name the folder being read, and a second summary is saved.
+    const progressSeen = page.waitForFunction(() => /Reading install manifests|Measuring caches|Reading game names/.test(document.getElementById('status').textContent), null, { timeout: 120000, polling: 50 });
+    await page.locator('#rescan').click();
+    await progressSeen;
+    await page.waitForFunction(() => !document.body.classList.contains('scanning'), null, { timeout: 120000 });
+    await page.waitForFunction(() => document.querySelector('#history-body .chart-line'));
+    assert.match(await page.locator('#history-body').textContent(), /Since the scan on|No size changes/);
+    await page.locator('#history-body .chart').scrollIntoViewIfNeeded();
+    const chartBox = await page.locator('#history-body .chart').boundingBox();
+    await page.mouse.move(chartBox.x + chartBox.width - 20, chartBox.y + chartBox.height / 2);
+    assert.equal(await page.locator('.chart-tooltip').isVisible(), true);
+    await page.screenshot({ path: path.join(output, 'history.png'), fullPage: true });
+    await language.selectOption('zh-CN');
+    assert.match(await page.locator('#history-body').textContent(), /与 .* 的扫描相比|没有大小变化/);
+    await language.selectOption('en');
+    for (const width of [800, 390]) {
+        await page.setViewportSize({ width, height: 844 });
+        await page.waitForTimeout(250);
+        const layout = await page.evaluate(() => ({ width: innerWidth, scroll: document.documentElement.scrollWidth }));
+        assert.ok(layout.scroll <= layout.width, `History overflow at ${width}: ${layout.scroll}`);
+    }
+    await page.setViewportSize({ width: 1120, height: 820 });
+    page.once('dialog', (dialog) => dialog.accept());
+    await page.locator('#history-clear').click();
+    await page.waitForFunction(() => document.getElementById('history-clear').hidden);
+    assert.equal(existsSync(path.join(historyFolder, 'history.json')), false);
+    await page.locator('#history-toggle').uncheck();
+    await page.waitForFunction(() => document.getElementById('history-body').textContent.includes('Off by default'));
+    console.log('PASS: opt-in history, scan progress, trend chart with hover, clear and turn off');
+
+    // Low space: a shrunken D: next to a roomy second drive should suggest games to move in Steam.
+    const crowded = structuredClone(report);
+    const tight = crowded.libraryRows[onlineIndex];
+    tight.total = 500 * 1024 ** 3;
+    tight.free = 8 * 1024 ** 3;
+    crowded.libraryRows.push({ path: 'Z:\\SteamLibrary', volume: 'Z:\\', online: true, free: 900 * 1024 ** 3, total: 1000 * 1024 ** 3, installed: 0, count: 0 });
+    await page.route('**/api/scan?*', (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(crowded) }));
+    await page.locator('#rescan').click();
+    await page.waitForFunction(() => document.querySelector('#migration-notes .note-row'));
+    const advice = await page.locator('#migration-notes').textContent();
+    assert.match(advice, /is low on space/);
+    assert.match(advice, /Z:\\SteamLibrary has 900\.0 GiB free; consider moving/);
+    assert.match(advice, /Settings > Storage/);
+    assert.equal(await page.locator(`#libraries [data-library="${onlineIndex}"] .drive-meter.low`).count(), 1);
+    await page.screenshot({ path: path.join(output, 'migration.png') });
+    await page.unroute('**/api/scan?*');
+    await page.route('**/api/scan?*', (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(report) }));
+    await page.locator('#rescan').click();
+    await page.waitForFunction(() => !document.querySelector('#migration-notes .note-row'));
+    await page.unroute('**/api/scan?*');
+    console.log('PASS: low-space drive gets move suggestions and a warning meter');
 
     await page.route('**/api/scan?*', (route) => route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ ok: false, error: 'Test scan unavailable' }) }));
     await page.locator('#rescan').click();

@@ -1,9 +1,8 @@
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
-import { fileURLToPath } from 'node:url';
+import { readAsset } from './assets.mjs';
 
 const execute = promisify(execFile);
-const recycleScript = fileURLToPath(new URL('../tools/recycle.ps1', import.meta.url));
 
 export async function steamRunning() {
     const { stdout } = await execute('tasklist.exe', ['/FI', 'IMAGENAME eq steam.exe', '/FO', 'CSV', '/NH'], { windowsHide: true });
@@ -18,12 +17,17 @@ export function launch(executable, args) {
     });
 }
 
-export async function recycle(folder) {
+// The script is passed inline so the packaged exe needs no file next to it.
+function recycleCommand() {
+    return Buffer.from(readAsset('src/recycle.ps1').toString('utf8'), 'utf16le').toString('base64');
+}
+
+export async function recycle(folder, env = {}) {
     try {
-        await execute('powershell.exe', ['-NoProfile', '-STA', '-File', recycleScript], {
+        await execute('powershell.exe', ['-NoProfile', '-STA', '-EncodedCommand', recycleCommand()], {
             windowsHide: true,
             timeout: 600000,
-            env: { ...process.env, STEAM_DISK_BILL_TARGET: folder },
+            env: { ...process.env, ...env, STEAM_DISK_BILL_TARGET: folder },
         });
     } catch (error) {
         if (error.code === 2) error.actionCode = 'cancelled';

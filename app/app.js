@@ -1,3 +1,4 @@
+import { attachChart, changes, chartMarkup } from './history.js';
 import { getLanguage, setLanguage, t, number, translateDocument } from './i18n.js';
 
 const $ = (id) => document.getElementById(id);
@@ -8,7 +9,8 @@ const VIEWS = [
   { id: 'cache', icon: 'box' },
   { id: 'offline', icon: 'offline' },
 ];
-const state = { report: null, days: 730, view: 'all', library: null, query: '', sort: 'size', busy: false, expanded: new Set(), status: { key: 'preparing', params: {}, error: false }, scanError: null, toast: null, actionBusy: false, pendingAction: null };
+const state = { report: null, days: 730, view: 'all', library: null, query: '', sort: 'size', busy: false, expanded: new Set(), status: { key: 'preparing', params: {}, error: false }, scanError: null, toast: null, actionBusy: false, pendingAction: null, history: undefined, historyBusy: false };
+const GIB = 1024 ** 3;
 let sessionToken = null;
 let visibleRows = [];
 let toastTimer;
@@ -46,12 +48,18 @@ function totalBytes(app) {
 function cacheRows() {
   if (!state.report) return [];
   return ['shader', 'workshop'].flatMap((kind) => state.report.orphans[kind].map((row) => ({
-    ...row, name: `App ${row.appid}`, isCache: true, kind,
+    ...row, name: row.name || `App ${row.appid}`, isCache: true, kind,
   })));
 }
 
+// Steam's Chinese name when the UI is Chinese and Steam has one; "App 123" when no name is known.
 function displayName(app) {
-  return app.isCache || (app.offline && app.name === `App ${app.appid}`) ? t('app', { id: app.appid }) : app.name;
+  const name = getLanguage() === 'zh-CN' && app.nameZh ? app.nameZh : app.name;
+  return name && name !== `App ${app.appid}` ? name : t('app', { id: app.appid });
+}
+
+function hasKnownName(app) {
+  return Boolean(app.name) && app.name !== `App ${app.appid}`;
 }
 
 function viewRows(view = state.view, applyLibrary = true) {
@@ -109,11 +117,62 @@ function renderLibraries() {
   const libraries = state.report.libraryRows;
   const onlineCount = libraries.filter((lib) => lib.online).length;
   $('library-count').textContent = t('libraryCount', { online: number(onlineCount), offline: number(libraries.length - onlineCount) });
-  $('libraries').innerHTML = libraries.map((lib, index) => `<button type="button" class="library-card${state.library === index ? ' active' : ''}" data-library="${index}" aria-pressed="${state.library === index}" title="${escapeHtml(t('filterLibrary', { path: lib.path }))}"><span class="drive-icon">${icon(lib.online ? 'drive' : 'offline')}</span><span class="drive-details"><span class="drive-heading"><span class="drive-path">${escapeHtml(lib.path)}</span>${lib.online ? '' : `<span class="badge badge-offline">${icon('offline')}${t('offline')}</span>`}</span><span class="drive-meta">${t(lib.online ? 'onlineMeta' : 'offlineMeta', { installed: formatBytes(lib.installed), free: formatBytes(lib.free), count: number(lib.count) })}</span></span></button>`).join('');
+  $('libraries').innerHTML = libraries.map((lib, index) => {
+    const meterShown = lib.online && lib.total > 0;
+    const used = meterShown ? (lib.total - lib.free) / lib.total : 0;
+    const low = meterShown && isLowSpace(lib);
+    const meta = !lib.online ? t('offlineMeta', { installed: formatBytes(lib.installed), count: number(lib.count) })
+      : t(meterShown ? 'onlineMetaTotal' : 'onlineMeta', { installed: formatBytes(lib.installed), free: formatBytes(lib.free), total: formatBytes(lib.total) });
+    const usage = t('usedShare', { percent: percent(used), free: formatBytes(lib.free), total: formatBytes(lib.total) });
+    const meter = meterShown ? `<span class="drive-meter${low ? ' low' : ''}" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(used * 100)}" aria-label="${escapeHtml(usage)}"><span data-share="${(used * 100).toFixed(1)}"></span></span><span class="drive-usage">${usage}${low ? ` · <span class="low-label">${t('lowSpace')}</span>` : ''}</span>` : '';
+    return `<button type="button" class="library-card${state.library === index ? ' active' : ''}" data-library="${index}" aria-pressed="${state.library === index}" title="${escapeHtml(t('filterLibrary', { path: lib.path }))}"><span class="drive-icon">${icon(lib.online ? 'drive' : 'offline')}</span><span class="drive-details"><span class="drive-heading"><span class="drive-path">${escapeHtml(lib.path)}</span>${lib.online ? '' : `<span class="badge badge-offline">${icon('offline')}${t('offline')}</span>`}</span><span class="drive-meta">${meta}</span>${meter}</span></button>`;
+  }).join('');
+  // Set through CSSOM: the page CSP blocks inline style attributes.
+  for (const bar of $('libraries').querySelectorAll('[data-share]')) bar.style.width = `${bar.dataset.share}%`;
+}
+
+function percent(share) {
+  return new Intl.NumberFormat(getLanguage(), { style: 'percent', maximumFractionDigits: 0 }).format(share);
+}
+
+// Below 10% or 20 GiB free counts as low: large game updates need room to download and unpack.
+function isLowSpace(lib) {
+  return lib.online && lib.total > 0 && (lib.free < lib.total * 0.1 || lib.free < 20 * GIB);
+}
+
+// One entry per drive: several libraries on the same drive share its free space.
+function volumes() {
+  const byVolume = new Map();
+  for (const lib of state.report.libraryRows) {
+    if (!lib.online || !lib.total) continue;
+    const entry = byVolume.get(lib.volume) || { volume: lib.volume, free: lib.free, total: lib.total, libraries: [] };
+    entry.libraries.push(lib);
+    byVolume.set(lib.volume, entry);
+  }
+  return [...byVolume.values()];
+}
+
+// Suggests games to move with Steam's own storage manager: inactive games first, then the largest.
+function migrationAdvice() {
+  const drives = volumes();
+  return drives.filter((drive) => isLowSpace(drive.libraries[0])).map((drive) => {
+    const target = drives.filter((other) => other !== drive && !isLowSpace(other.libraries[0])).sort((a, b) => b.free - a.free)[0];
+    if (!target) return { drive, target: null, games: [] };
+    const paths = new Set(drive.libraries.map((lib) => lib.path));
+    let room = target.free - Math.max(target.total * 0.1, 20 * GIB);
+    const games = [];
+    const candidates = state.report.rows.filter((app) => !app.offline && !app.redist && paths.has(app.library))
+      .sort((a, b) => (Number(b.cold) - Number(a.cold)) || (b.size - a.size));
+    for (const app of candidates) {
+      if (games.length === 3) break;
+      if (app.size <= room) { games.push(app); room -= app.size; }
+    }
+    return { drive, target, games };
+  });
 }
 
 function artwork(app) {
-  const initials = Array.from(app.name.replace(/^App /, '')).slice(0, 2).join('').toUpperCase();
+  const initials = Array.from(hasKnownName(app) ? displayName(app) : app.appid).slice(0, 2).join('').toUpperCase();
   return `<span class="game-art" aria-hidden="true"><span>${escapeHtml(initials)}</span><img src="/art/${encodeURIComponent(app.appid)}" alt="" loading="lazy"></span>`;
 }
 
@@ -127,7 +186,7 @@ function gameTags(app) {
     if (app.workshop > 0) tags.push(`<span>${t('workshopSize', { size: formatBytes(app.workshop) })}</span>`);
     if (app.installMissing || app.incomplete) tags.push(`<span class="badge badge-warning">${t('checkInstall')}</span>`);
   }
-  if (!tags.length) tags.push(`<span>${escapeHtml(t('app', { id: app.appid }))}</span>`);
+  if (!tags.length || ((app.isCache || app.offline) && hasKnownName(app))) tags.push(`<span>${escapeHtml(t('app', { id: app.appid }))}</span>`);
   return tags.join('');
 }
 
@@ -233,9 +292,9 @@ function renderList() {
   $('list-heading').textContent = t(`view.${state.view}`);
   $('view-description').textContent = t(`description.${state.view}`, { days: number(state.days) });
   const needle = state.query.trim().toLocaleLowerCase();
-  visibleRows = viewRows().filter((app) => !needle || app.name.toLocaleLowerCase().includes(needle) || displayName(app).toLocaleLowerCase().includes(needle) || app.appid.includes(needle));
+  visibleRows = viewRows().filter((app) => !needle || [app.name, app.nameZh, displayName(app)].some((name) => name?.toLocaleLowerCase().includes(needle)) || app.appid.includes(needle));
   visibleRows.sort((a, b) => {
-    if (state.sort === 'name') return a.name.localeCompare(b.name, getLanguage());
+    if (state.sort === 'name') return displayName(a).localeCompare(displayName(b), getLanguage());
     if (state.sort === 'played') return (b.lastPlayed || 0) - (a.lastPlayed || 0);
     return totalBytes(b) - totalBytes(a);
   });
@@ -254,6 +313,13 @@ function renderList() {
 function renderNotes() {
   const { totals, rows, errors } = state.report;
   const tools = rows.filter((app) => app.redist && !app.offline);
+  $('migration-notes').innerHTML = migrationAdvice().map(({ drive, target, games }) => {
+    const params = { volume: drive.volume, free: formatBytes(drive.free), total: formatBytes(drive.total) };
+    let body = t('migrationNoTarget', params);
+    if (target && games.length) body = t('migrationMove', { ...params, target: target.libraries[0].path, targetFree: formatBytes(target.free), games: games.map((app) => `${displayName(app)} (${formatBytes(app.size)})`).join(t('listSeparator')) });
+    else if (target) body = t('migrationNoFit', { ...params, target: target.libraries[0].path, targetFree: formatBytes(target.free) });
+    return `<div class="note-row note-warning">${icon('drive')}<div><strong>${t('migrationTitle', params)}</strong> ${escapeHtml(body)}</div></div>`;
+  }).join('');
   const notes = [];
   if (totals.downloads > 0 || totals.temp > 0) notes.push(`<div class="note-row">${icon('download')}<div><strong>${t('downloadsTitle')}</strong> ${t('downloading', { size: formatBytes(totals.downloads) })}${totals.temp ? ` · ${t('staging', { size: formatBytes(totals.temp) })}` : ''}. ${t('excluded')}</div></div>`);
   if (tools.length || totals.emptyShaderDirs) notes.push(`<div class="note-row">${icon('info')}<div>${tools.length ? t('toolsNote', { count: number(tools.length), size: formatBytes(tools.reduce((sum, app) => sum + app.size, 0)) }) : ''} ${totals.emptyShaderDirs ? t('emptyShaders', { count: number(totals.emptyShaderDirs) }) : ''}</div></div>`);
@@ -292,7 +358,96 @@ function render() {
   renderLibraries();
   renderList();
   renderNotes();
+  renderHistory();
   renderActionControls();
+}
+
+function formatDate(seconds) {
+  return new Date(seconds * 1000).toLocaleDateString(getLanguage(), { month: 'short', day: 'numeric' });
+}
+
+function formatTime(seconds) {
+  return new Date(seconds * 1000).toLocaleTimeString(getLanguage(), { hour: '2-digit', minute: '2-digit' });
+}
+
+function signedBytes(bytes) {
+  return `${bytes > 0 ? '+' : bytes < 0 ? '−' : '±'}${formatBytes(Math.abs(bytes))}`;
+}
+
+function renderHistory() {
+  const history = state.history;
+  const panel = $('history-body');
+  if (history === undefined) return;
+  $('history-toggle').checked = Boolean(history?.enabled);
+  $('history-toggle').disabled = !history || state.historyBusy;
+  $('history-clear').hidden = !history?.entries.length;
+  $('history-clear').disabled = state.historyBusy;
+  if (!history) { panel.innerHTML = `<p class="muted">${t('historyUnavailable')}</p>`; return; }
+  const location = `<p class="history-location">${escapeHtml(t('historyLocation', { location: history.location, limit: number(history.limit) }))}</p>`;
+  const entries = history.entries;
+  if (!history.enabled && !entries.length) { panel.innerHTML = `<p class="muted">${escapeHtml(t('historyOff', { location: history.location }))}</p>`; return; }
+  if (!entries.length) { panel.innerHTML = `<p class="muted">${t('historyEmpty')}</p>${location}`; return; }
+  panel.innerHTML = '<div class="history-grid"><div class="history-chart"></div><div class="history-summary"></div></div>';
+  const chartBox = panel.querySelector('.history-chart');
+  const width = Math.max(260, Math.round(chartBox.clientWidth || 600));
+  // Several scans on one day are told apart by time rather than repeating the date.
+  const sameDay = new Date(entries[0].scannedAt * 1000).toDateString() === new Date(entries.at(-1).scannedAt * 1000).toDateString();
+  chartBox.innerHTML = chartMarkup(entries, { formatGib: (bytes, decimals) => `${number(bytes / GIB, decimals)} GiB`, formatDate: sameDay ? formatTime : formatDate, label: escapeHtml(t('historyChart', { count: number(entries.length), first: formatDate(entries[0].scannedAt), last: formatDate(entries.at(-1).scannedAt) })) }, width);
+  const diff = changes(entries);
+  let summary = `<p class="muted">${t('historyOne')}</p>`;
+  if (diff) {
+    const lead = diff.delta === 0 && !diff.rows.length ? t('historyNoChange', { date: formatDate(diff.previous.scannedAt) })
+      : t('historySince', { date: formatDate(diff.previous.scannedAt), delta: signedBytes(diff.delta) });
+    const rows = diff.rows.map((row) => `<tr><td>${escapeHtml(row.name)}${row.kind === 'changed' ? '' : ` <span class="badge badge-muted">${t(row.kind === 'added' ? 'historyAdded' : 'historyRemoved')}</span>`}</td><td class="size-cell">${signedBytes(row.delta)}</td></tr>`).join('');
+    summary = `<p class="history-lead">${lead}</p>${rows ? `<table class="history-table"><thead><tr><th scope="col">${t('gameHeader')}</th><th scope="col" class="size-column">${t('historyChange')}</th></tr></thead><tbody>${rows}</tbody></table>` : ''}${diff.more ? `<p class="muted">${t('historyMore', { count: number(diff.more) })}</p>` : ''}`;
+  }
+  panel.querySelector('.history-summary').innerHTML = summary;
+  panel.insertAdjacentHTML('beforeend', `${history.enabled ? '' : `<p class="muted">${t('historyPaused')}</p>`}${location}`);
+  attachChart(chartBox, entries, (entry, previous) => t('historyTooltip', { date: `${formatDate(entry.scannedAt)} ${formatTime(entry.scannedAt)}`, size: formatBytes(entry.installed) }) + (previous ? ` · ${signedBytes(entry.installed - previous.installed)}` : ''));
+}
+
+async function loadHistory() {
+  try {
+    const response = await fetch('/api/history');
+    const result = await response.json();
+    state.history = response.ok && result.ok ? result : null;
+  } catch {
+    state.history = null;
+  }
+  renderHistory();
+}
+
+async function updateHistory(url, body) {
+  if (state.historyBusy) return;
+  state.historyBusy = true;
+  // Keep the switch where the user put it while the request runs.
+  if (typeof body.enabled === 'boolean' && state.history) state.history = { ...state.history, enabled: body.enabled };
+  renderHistory();
+  try {
+    state.history = await authenticatedPost(url, body);
+    if (url.endsWith('/clear')) showToast('historyCleared');
+  } catch {
+    showToast('historyError');
+    await loadHistory();
+  } finally {
+    state.historyBusy = false;
+    renderHistory();
+  }
+}
+
+// Polls the server while a scan runs so the status bar names the folder being read.
+function watchProgress() {
+  const timer = setInterval(async () => {
+    try {
+      const result = await (await fetch('/api/progress')).json();
+      if (!state.busy || !result.progress) return;
+      const { step, library, index, count } = result.progress;
+      setStatus(step === 'names' ? 'progressNames' : step === 'caches' ? 'progressCaches' : 'progressManifests', { path: library, index: number(index), count: number(count) });
+    } catch {
+      // Progress is only a hint; the scan request itself reports failures.
+    }
+  }, 400);
+  return () => clearInterval(timer);
 }
 
 function selectView(view) {
@@ -344,6 +499,7 @@ async function load() {
   $('rescan').disabled = true;
   for (const button of document.querySelectorAll('[data-days]')) button.disabled = true;
   setStatus('scanningStatus');
+  const stopProgress = watchProgress();
   try {
     const response = await fetch(`/api/scan?days=${state.days}`);
     const report = await response.json();
@@ -356,9 +512,12 @@ async function load() {
     if (state.library !== null && !report.libraryRows[state.library]) state.library = null;
     document.body.classList.add('has-report');
     state.busy = false;
+    stopProgress();
     setStatus('completeStatus', { seconds: number(report.elapsedMs / 1000, 1), path: report.steamPath });
     render();
+    loadHistory();
   } catch (error) {
+    stopProgress();
     state.busy = false;
     state.scanError = error instanceof Error ? error.message : '';
     setStatus(state.report ? 'previousStatus' : 'failedStatus', { error: state.scanError }, true);
@@ -380,9 +539,9 @@ async function copyReport() {
     t('reportReview', { size: formatBytes(report.totals.reclaimable) }),
     t('reportInstalled', { size: formatBytes(report.totals.installed) }),
     '', t('reportInactive'),
-    ...report.rows.filter((app) => app.cold).map((app) => `- ${app.name} (${app.appid}) ${formatBytes(app.size)} · ${app.library}`),
+    ...report.rows.filter((app) => app.cold).map((app) => `- ${displayName(app)} (${app.appid}) ${formatBytes(app.size)} · ${app.library}`),
     '', t('reportCaches'),
-    ...cacheRows().map((row) => `- ${t(row.kind)} ${row.appid}: ${formatBytes(row.bytes)} · ${row.library}`),
+    ...cacheRows().map((row) => `- ${t(row.kind)} · ${displayName(row)} (${row.appid}): ${formatBytes(row.bytes)} · ${row.library}`),
     '', t('reportOffline'),
     ...report.libraryRows.filter((lib) => !lib.online).map((lib) => `- ${lib.path}: ${formatBytes(lib.installed)}`),
   ];
@@ -428,6 +587,10 @@ $('action-ack').addEventListener('change', renderActionControls);
 $('action-confirm').addEventListener('click', commitAction);
 $('action-cancel').addEventListener('click', () => { if (!state.actionBusy) { state.pendingAction = null; $('action-dialog').close(); } });
 $('action-dialog').addEventListener('cancel', (event) => { if (state.actionBusy) event.preventDefault(); else state.pendingAction = null; });
+$('history-toggle').addEventListener('change', (event) => updateHistory('/api/history/settings', { enabled: event.target.checked }));
+$('history-clear').addEventListener('click', () => { if (window.confirm(t('historyClearConfirm'))) updateHistory('/api/history/clear', {}); });
+let resizeTimer;
+window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(renderHistory, 150); });
 $('quit').addEventListener('click', async () => {
   try { await authenticatedPost('/api/shutdown', {}); window.close(); setStatus('stopped'); }
   catch { showToast('alreadyStopped'); }
@@ -435,4 +598,5 @@ $('quit').addEventListener('click', async () => {
 setInterval(() => { fetch('/api/heartbeat', { method: 'POST' }).catch(() => {}); }, 2000);
 translateDocument();
 render();
+loadHistory();
 load();
