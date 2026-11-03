@@ -1,0 +1,5 @@
+{
+  "workspace": {
+    "library": [".millennium/lsp/lua-types"]
+  }
+}

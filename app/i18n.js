@@ -1,0 +1,218 @@
+const messages = {
+  en: {
+    companion: 'Library storage companion', readOnly: 'LOCAL APP', quit: 'Quit',
+    language: 'Interface language', storageNavigation: 'Storage navigation', views: 'Views',
+    yourLibrary: 'YOUR LIBRARY', libraryFolders: 'Library folders', libraryFoldersLabel: 'LIBRARY FOLDERS',
+    waiting: 'Waiting for scan', privacyTitle: 'Your files stay yours.',
+    privacyBody: 'No account. No uploads. No automatic cleanup.',
+    breadcrumb: 'LIBRARY / STORAGE', overview: 'Storage overview',
+    overviewSubtitle: 'Know what is installed. Find what is left behind.',
+    scan: 'Scan libraries', scanning: 'Scanning', notPlayedIn: 'Not played in', threshold: 'Inactivity threshold',
+    days180: '180 days', year1: '1 year', years2: '2 years', scope: 'Overview totals cover all online libraries',
+    storageSummary: 'Storage summary', review: 'SPACE TO REVIEW',
+    reviewInitial: 'A local scan will find inactive games and leftover caches.',
+    reviewGames: 'Review inactive games', reading: 'Reading local libraries', detecting: 'Detecting drives',
+    copy: 'Copy report', search: 'Search games or App ID', sortBy: 'Sort by', sortGames: 'Sort games',
+    size: 'Size on disk', name: 'Name', lastPlayed: 'Last played', gameHeader: 'GAME',
+    sizeHeader: 'SIZE ON DISK', playedHeader: 'LAST PLAYED', details: 'Details',
+    checking: 'Checking installed games and caches',
+    safety: 'Review estimates are not a promise of safe cleanup. Play history can be incomplete. Game removal goes through Steam; cache removal requires confirmation in this app and Windows. Nothing is cleaned automatically.',
+    preparing: 'Preparing local scan', localOnly: 'LOCAL FILES ONLY',
+    'view.all': 'Installed games', 'view.cold': 'Inactive games', 'view.never': 'No play history',
+    'view.cache': 'Cache leftovers', 'view.offline': 'Offline libraries', allLibraries: 'All libraries',
+    unavailable: 'Unavailable', noHistory: 'No history', today: 'Today', yesterday: 'Yesterday', daysAgo: '{count} days ago',
+    reviewDescription: 'Inactive games: {games}. Leftover cache folders: {caches}. Review before making any changes.',
+    installedApps: 'Installed apps', installedNote: 'Games: {count} + shared tools',
+    inactiveInstalls: 'Inactive installs', inactiveNote: 'No play in {days} days, or no history',
+    workshopContent: 'Workshop content', workshopNote: 'Attached to installed games',
+    activeDownloads: 'Active downloads', downloadsNote: 'Excluded from review estimate',
+    libraryCount: '{online} online · {offline} offline', filterLibrary: 'Filter to {path}', offline: 'Offline',
+    onlineMeta: '{installed} installed · {free} free', offlineMeta: 'Last known: {installed} · apps: {count}',
+    shader: 'Shader cache', workshop: 'Workshop files', inactive: 'Inactive',
+    workshopSize: '{size} workshop', checkInstall: 'Check install', app: 'App {id}',
+    cacheWarning: 'No online installation was found. A disconnected library or incomplete scan can affect this match. Check before removing anything.',
+    offlineWarning: 'This drive is not available. Size is the last record in libraryfolders.vdf, not a current measurement. It is excluded from online totals.',
+    missingInstall: 'The install folder could not be found.', incomplete: 'Steam does not mark this app as fully installed.',
+    sharedDepots: 'Shared depot references: {ids}. These are not proof of broken dependencies.',
+    manifest: 'Install manifest', store: 'View on Steam', detailsFor: 'Details for {name}',
+    'description.all': "Installed sizes use Steam's local manifests. Expand a game for the breakdown.",
+    'description.cold': 'Not played for {days} days, or no recorded play history. Shared redistributables are excluded.',
+    'description.never': 'A zero last-played value means no local history, not proof a game has never been played.',
+    'description.cache': 'Non-empty shader and workshop folders without a matching online install. Expand to inspect the path.',
+    'description.offline': 'Disconnected library records. These last-known sizes are excluded from all online totals.',
+    noMatches: 'No matching games', emptyView: 'Nothing in this view',
+    searchHint: 'Try a different name or App ID.', viewHint: 'Choose another library or view from the sidebar.',
+    downloadsTitle: 'Downloads are left alone.', downloading: '{size} downloading', staging: '{size} staging',
+    excluded: 'Not included in the review estimate.',
+    toolsNote: 'Shared tools: {count} ({size}), excluded from inactive installs.',
+    emptyShaders: 'Empty shader folders ignored: {count}.', scanWarnings: 'Scan warnings: {count}',
+    scanningStatus: 'Scanning local libraries and caches. This may take a minute.',
+    completeStatus: 'Scan complete · {seconds}s · {path}', failedStatus: 'Scan failed: {error}',
+    previousStatus: 'Scan failed: {error} Showing the previous scan.', scanFailed: 'Scan failed.',
+    lastScan: 'LAST SCAN {time}', couldNotRead: 'Could not read the library',
+    retryHint: 'Check Steam is installed, then try Scan libraries again.', scanUnavailable: 'Scan unavailable',
+    noLibraryData: 'No library data. Try scanning again.', notAvailable: 'Not available',
+    reportTitle: 'Steam Disk Bill — local scan, inactive after {days} days',
+    reportReview: 'Space to review: {size} (not guaranteed safe to remove)', reportInstalled: 'Installed apps: {size}',
+    reportInactive: 'Inactive installs:', reportCaches: 'Leftover caches:',
+    reportOffline: 'Offline libraries (last known, excluded from totals):',
+    copied: 'Report copied to clipboard', clipboardUnavailable: 'Clipboard is unavailable in this window',
+    stopped: 'Steam Disk Bill has stopped. You can close this window.',
+    alreadyStopped: 'The local service is already stopped. You can close this window.',
+    openFolder: 'Open folder', removeCache: 'Delete cache', uninstall: 'Uninstall via Steam',
+    actionsHint: 'Expand a row to open its folder or review removal options.',
+    confirmCache: 'Delete this cache folder?', confirmGame: 'Uninstall this game?',
+    cacheConfirmBody: 'Close Steam first. Windows will ask to move this exact folder and its contents to the Recycle Bin. If Windows says it cannot recycle the folder, cancel rather than choose permanent deletion. Recycling does not free disk space until the Recycle Bin is emptied.',
+    gameConfirmBody: 'This sends an uninstall request to Steam, where you must finish the uninstall process. This app will not directly delete the game folder. Rescan after completing the uninstall.',
+    acknowledge: 'I have checked the target and understand the risks.', cancel: 'Cancel',
+    confirmRecycle: 'Move to Recycle Bin', confirmUninstall: 'Open Steam uninstall',
+    actionPending: 'Working', actionErrorTitle: 'Action could not be completed',
+    folderOpened: 'Folder open request sent to Windows',
+    uninstallRequested: 'Uninstall request sent to Steam. Complete it there, then rescan.',
+    cacheRemoved: 'Folder removed through Windows. Check the Recycle Bin for recovery.',
+    'action.staleTarget': 'The scan or target has changed. Scan libraries again.',
+    'action.unsafePath': 'Linked or unexpected paths are blocked for safety.',
+    'action.unavailableTarget': 'This target is offline, unavailable, or not eligible for removal.',
+    'action.scanIncomplete': 'Resolve the scan warnings and scan again before deleting caches.',
+    'action.cacheInUse': 'Steam still has an installation, download, or library record for this app. Deletion is blocked.',
+    'action.steamRunning': 'Exit Steam completely before removing leftover caches, then try again.',
+    'action.steamUnavailable': 'Steam.exe was not found in the detected Steam installation.',
+    'action.confirmationRequired': 'Explicit confirmation is required.',
+    'action.confirmationExpired': 'Confirmation expired or was already used. Review the target again.',
+    'action.actionBusy': 'Another action is running. Please wait.',
+    'action.forbidden': 'The app session has changed. Reload this window.',
+    'action.cancelled': 'The Windows operation was cancelled. No automatic retry was made.',
+    'action.operationFailed': 'Windows could not complete the operation. Rescan to check the current state.',
+    'action.invalidRequest': 'The request was not accepted. Reload this window.',
+  },
+  'zh-CN': {
+    companion: '游戏库磁盘账单', readOnly: '本地应用', quit: '退出',
+    language: '界面语言', storageNavigation: '存储空间导航', views: '查看分类',
+    yourLibrary: '你的游戏库', libraryFolders: '游戏库文件夹', libraryFoldersLabel: '游戏库文件夹',
+    waiting: '等待扫描', privacyTitle: '你的文件，由你掌控。',
+    privacyBody: '无需账号，不上传数据，不自动清理。',
+    breadcrumb: '游戏库 / 存储空间', overview: '存储空间概览',
+    overviewSubtitle: '看清游戏占用，找出遗留文件。',
+    scan: '扫描游戏库', scanning: '正在扫描', notPlayedIn: '未游玩时长', threshold: '长期未玩判定阈值',
+    days180: '180 天', year1: '1 年', years2: '2 年', scope: '概览统计包含所有在线游戏库',
+    storageSummary: '存储空间统计', review: '待检查空间',
+    reviewInitial: '扫描本地游戏库，查找长期未玩的游戏与遗留缓存。',
+    reviewGames: '查看长期未玩的游戏', reading: '正在读取本地游戏库', detecting: '正在检测磁盘',
+    copy: '复制报告', search: '搜索游戏名称或 App ID', sortBy: '排序', sortGames: '游戏排序方式',
+    size: '磁盘占用', name: '名称', lastPlayed: '上次游玩', gameHeader: '游戏',
+    sizeHeader: '磁盘占用', playedHeader: '上次游玩', details: '详细信息',
+    checking: '正在检查已安装游戏与缓存',
+    safety: '待检查空间不代表可以安全清理，游玩历史也可能不完整。游戏通过 Steam 卸载；删除缓存需在本应用和 Windows 中确认。不会自动清理任何文件。',
+    preparing: '正在准备本地扫描', localOnly: '仅读取本地文件',
+    'view.all': '已安装游戏', 'view.cold': '长期未玩', 'view.never': '无游玩记录',
+    'view.cache': '遗留缓存', 'view.offline': '离线游戏库', allLibraries: '全部游戏库',
+    unavailable: '不可用', noHistory: '无记录', today: '今天', yesterday: '昨天', daysAgo: '{count} 天前',
+    reviewDescription: '{games} 个长期未玩游戏，{caches} 个遗留缓存文件夹，处理前请先核实。',
+    installedApps: '已安装应用', installedNote: '{count} 个游戏及共享工具',
+    inactiveInstalls: '长期未玩占用', inactiveNote: '{days} 天内未游玩，或无记录',
+    workshopContent: '创意工坊内容', workshopNote: '属于已安装游戏',
+    activeDownloads: '正在下载', downloadsNote: '不计入待检查空间',
+    libraryCount: '{online} 个在线 · {offline} 个离线', filterLibrary: '筛选游戏库：{path}', offline: '离线',
+    onlineMeta: '已安装 {installed} · 可用 {free}', offlineMeta: '上次记录：{installed} · {count} 个应用',
+    shader: '着色器缓存', workshop: '创意工坊文件', inactive: '长期未玩',
+    workshopSize: '创意工坊 {size}', checkInstall: '检查安装状态', app: '应用 {id}',
+    cacheWarning: '未找到对应的在线安装记录。磁盘未连接或扫描不完整可能影响匹配结果，请核实后再处理任何文件。',
+    offlineWarning: '当前无法访问此磁盘。大小来自 libraryfolders.vdf 中的上次记录，并非本次测量结果，且不计入在线游戏库总计。',
+    missingInstall: '未找到游戏安装文件夹。', incomplete: 'Steam 未将此应用标记为完整安装。',
+    sharedDepots: '引用的共享 Depot：{ids}。这不代表依赖一定损坏。',
+    manifest: '安装清单记录', store: '在 Steam 商店查看', detailsFor: '{name} 的详细信息',
+    'description.all': '安装大小取自 Steam 本地清单。展开游戏可查看占用明细。',
+    'description.cold': '超过 {days} 天未游玩，或没有本地游玩记录。不包含共享运行库。',
+    'description.never': '上次游玩时间为零仅表示没有本地记录，不代表从未玩过。',
+    'description.cache': '未匹配到在线安装记录的非空着色器与创意工坊文件夹。展开可查看路径。',
+    'description.offline': '当前未连接的游戏库记录。上次记录的大小不计入任何在线总计。',
+    noMatches: '没有匹配的游戏', emptyView: '此分类暂无内容',
+    searchHint: '试试其他名称或 App ID。', viewHint: '请在侧栏选择其他游戏库或分类。',
+    downloadsTitle: '不会处理下载中的文件。', downloading: '正在下载 {size}', staging: '暂存数据 {size}',
+    excluded: '不计入待检查空间。',
+    toolsNote: '{count} 个共享工具（{size}）不计入长期未玩占用。',
+    emptyShaders: '已忽略 {count} 个空着色器文件夹。', scanWarnings: '{count} 条扫描警告',
+    scanningStatus: '正在扫描本地游戏库与缓存，可能需要一些时间。',
+    completeStatus: '扫描完成 · {seconds} 秒 · {path}', failedStatus: '扫描失败：{error}',
+    previousStatus: '扫描失败：{error} 当前显示上一次扫描结果。', scanFailed: '扫描失败。',
+    lastScan: '上次扫描 {time}', couldNotRead: '无法读取游戏库',
+    retryHint: '请检查 Steam 是否已安装，然后再次点击“扫描游戏库”。', scanUnavailable: '扫描暂不可用',
+    noLibraryData: '暂无游戏库数据，请重新扫描。', notAvailable: '暂不可用',
+    reportTitle: 'Steam Disk Bill — 本地扫描，长期未玩阈值为 {days} 天',
+    reportReview: '待检查空间：{size}（不保证可以安全删除）', reportInstalled: '已安装应用：{size}',
+    reportInactive: '长期未玩的安装内容：', reportCaches: '遗留缓存：',
+    reportOffline: '离线游戏库（上次记录，不计入总计）：',
+    copied: '报告已复制到剪贴板', clipboardUnavailable: '当前窗口无法使用剪贴板',
+    stopped: 'Steam Disk Bill 已停止，可以关闭窗口。',
+    alreadyStopped: '本地服务已停止，可以关闭窗口。',
+    openFolder: '打开文件夹', removeCache: '删除缓存', uninstall: '通过 Steam 卸载',
+    actionsHint: '展开条目后，可打开文件夹或查看删除、卸载选项。',
+    confirmCache: '删除这个缓存文件夹？', confirmGame: '卸载这个游戏？',
+    cacheConfirmBody: '请先完全退出 Steam。Windows 将再次确认是否把下方文件夹及其内容移到回收站。如果系统提示无法回收，请取消，不要选择永久删除。移到回收站后，需清空回收站才会释放磁盘空间。',
+    gameConfirmBody: '将向 Steam 发送卸载请求，需在 Steam 中完成卸载。本应用不会直接删除游戏文件夹。卸载完成后，请重新扫描。',
+    acknowledge: '我已核对目标，并了解此操作的风险。', cancel: '取消',
+    confirmRecycle: '移到回收站', confirmUninstall: '在 Steam 中卸载',
+    actionPending: '正在处理', actionErrorTitle: '操作未能完成',
+    folderOpened: '已向 Windows 发送打开文件夹请求',
+    uninstallRequested: '已向 Steam 发送卸载请求，请完成卸载后重新扫描。',
+    cacheRemoved: '文件夹已由 Windows 移除，可在回收站中检查恢复。',
+    'action.staleTarget': '扫描结果或目标已变化，请重新扫描游戏库。',
+    'action.unsafePath': '为安全起见，不允许操作链接目录或异常路径。',
+    'action.unavailableTarget': '目标离线、不可用，或不符合删除条件。',
+    'action.scanIncomplete': '请先解决扫描警告并重新扫描，再删除缓存。',
+    'action.cacheInUse': 'Steam 仍保存此应用的安装、下载或游戏库记录，已阻止删除。',
+    'action.steamRunning': '删除遗留缓存前，请完全退出 Steam，然后重试。',
+    'action.steamUnavailable': '在识别到的 Steam 安装目录中未找到 Steam.exe。',
+    'action.confirmationRequired': '此操作需要明确确认。',
+    'action.confirmationExpired': '确认已过期或已使用，请重新核对目标。',
+    'action.actionBusy': '另一项操作正在进行，请稍候。',
+    'action.forbidden': '应用会话已变化，请刷新窗口。',
+    'action.cancelled': '已取消 Windows 操作，程序没有自动重试。',
+    'action.operationFailed': 'Windows 未能完成此操作，请重新扫描确认当前状态。',
+    'action.invalidRequest': '请求未被接受，请刷新窗口。',
+  },
+};
+
+const storageKey = 'disk-bill.language';
+let language = initialLanguage();
+
+function initialLanguage() {
+  try {
+    const saved = localStorage.getItem(storageKey);
+    if (Object.hasOwn(messages, saved)) return saved;
+  } catch { /* Language selection still works when storage is blocked. */ }
+  for (const preferred of navigator.languages || [navigator.language]) {
+    if (/^zh\b/i.test(preferred)) return 'zh-CN';
+    if (/^en\b/i.test(preferred)) return 'en';
+  }
+  return 'en';
+}
+
+export function getLanguage() { return language; }
+
+export function setLanguage(value) {
+  if (!Object.hasOwn(messages, value)) return;
+  language = value;
+  try { localStorage.setItem(storageKey, language); } catch { /* Storage is optional. */ }
+}
+
+export function t(key, params = {}) {
+  const template = messages[language][key] ?? messages.en[key];
+  if (template === undefined) throw new Error(`Unknown translation key: ${key}`);
+  return template.replace(/\{(\w+)\}/g, (_, name) => String(params[name] ?? `{${name}}`));
+}
+
+export function number(value, decimals = 0) {
+  return new Intl.NumberFormat(language, { minimumFractionDigits: decimals, maximumFractionDigits: decimals }).format(value);
+}
+
+export function translateDocument() {
+  document.documentElement.lang = language;
+  for (const [attribute, target] of [['data-i18n', null], ['data-i18n-placeholder', 'placeholder'], ['data-i18n-label', 'aria-label']]) {
+    for (const element of document.querySelectorAll(`[${attribute}]`)) {
+      const value = t(element.getAttribute(attribute));
+      if (target) element.setAttribute(target, value); else element.textContent = value;
+    }
+  }
+  document.getElementById('language').value = language;
+}

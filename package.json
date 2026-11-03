@@ -1,0 +1,14 @@
+{
+  "name": "steam-disk-bill",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.mjs",
+    "preview": "node tools/preview.mjs",
+    "test:actions": "node tools/actions-test.mjs",
+    "test:ui": "node tools/ui-smoke.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.58.2"
+  }
+}
